@@ -10,4 +10,6 @@
   public List<string> keywords { get; set; }
   public string power { get; set; }
   public string toughness { get; set; }
+  public string loyalty { get; set; }
+  public string quantity { get; set; }
 }

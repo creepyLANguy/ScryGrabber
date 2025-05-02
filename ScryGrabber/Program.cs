@@ -4,14 +4,16 @@ using Formatting = Newtonsoft.Json.Formatting;
 
 namespace ScryGrabber;
 
-class Program
+internal class Program
 {
+  public static string FuzzyFetchCardInfoEndpoint = "https://api.scryfall.com/cards/named?fuzzy=";
+
   private static readonly HttpClient Client = new()
   {
     BaseAddress = new Uri("https://api.scryfall.com")
   };
 
-  static async Task Main()
+  private static async Task Main()
   {
     try
     {
@@ -23,9 +25,9 @@ class Program
     }
   }
 
-  static async Task DoTheThings()
+  private static async Task DoTheThings()
   {
-    Client.DefaultRequestHeaders.UserAgent.ParseAdd("DeckCardFetcher/1.0 (+https://yourdomain.com)");
+    Client.DefaultRequestHeaders.UserAgent.ParseAdd("ScryGrabber/1.0 (+https://yourdomain.com)");
     Client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
 
     Console.WriteLine("Enter path of MTGO deck .txt file: ");
@@ -34,22 +36,22 @@ class Program
     {
       input = Console.ReadLine() ?? string.Empty;
     }
-    if (input.Contains(".txt") == false)
-    {
-      input += ".txt";
-    }
+    input += input.Contains(".txt") ? string.Empty : ".txt";
+    
 
     var lines = await File.ReadAllLinesAsync(input);
-    var cardNames = ParseCardNames(lines);
+    var cardNames = ParseCardNames(lines.ToList());
     var mainboard = new List<CardInfo>();
     var sideboard = new List<CardInfo>();
-    var commander = new List<CardInfo>();
+    var commanders = new List<CardInfo>();
 
-    foreach(var(cardName, section) in cardNames)
+    foreach(var(cardName, section, quantity) in cardNames)
     {
-      var cardInfo = await FetchSingleCard(cardName);
+      var cardInfo = await FetchCardInfo(cardName);
       if (cardInfo != null)
       {
+        cardInfo.quantity = quantity.ToString();
+
         switch (section)
         {
           case "mainboard":
@@ -58,8 +60,8 @@ class Program
           case "sideboard":
             sideboard.Add(cardInfo);
             break;
-          case "commander":
-            commander.Add(cardInfo);
+          case "commanders":
+            commanders.Add(cardInfo);
             break;
         }
       }
@@ -67,7 +69,7 @@ class Program
 
     var outputObject = new
     {
-      commander,
+      commanders,
       mainboard,
       sideboard
     };
@@ -79,14 +81,18 @@ class Program
     Console.WriteLine("Done! Cards details saved to " + output);
   }
 
-  static List<(string name, string section)> ParseCardNames(string[] lines)
+  //TODO - Find a much better way of breaking this down. Not robust and will fail on 60 card decks.
+  private static List<(string name, string section, int quantity)> ParseCardNames(List<string> lines)
   {
-    var cardNames = new List<(string name, string section)>();
+    var cardNames = new List<(string name, string section, int quantity)>();
+
+    AddCommanders(ref lines, ref cardNames);
+
     var inSideboard = false;
 
-    for (var i = 0; i < lines.Length; i++)
+    foreach (var line in lines)
     {
-      var trimmed = lines[i].Trim();
+      var trimmed = line.Trim();
 
       if (string.IsNullOrEmpty(trimmed))
         continue;
@@ -98,26 +104,45 @@ class Program
       }
 
       var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-      if (parts.Length != 2 || !int.TryParse(parts[0], out _))
+      if (parts.Length != 2 || !int.TryParse(parts[0], out var quantity))
       {
         continue;
       }
 
-      // If it's the last valid line, treat it as the commander
-      var isLastValidLine = i == lines.Length - 1 ||
-                            lines.Skip(i + 1).All(string.IsNullOrWhiteSpace);
+      var section = inSideboard ? "sideboard" : "mainboard";
 
-      var section = isLastValidLine ? "commander" : (inSideboard ? "sideboard" : "mainboard");
-
-      cardNames.Add((parts[1], section));
+      cardNames.Add((parts[1], section, quantity));
     }
 
     return cardNames;
   }
 
-  static async Task<CardInfo?> FetchSingleCard(string name)
+  private static void AddCommanders(ref List<string> lines, ref List<(string name, string section, int quantity)> cardNames)
   {
-    var url = $"https://api.scryfall.com/cards/named?fuzzy={Uri.EscapeDataString(name)}";
+    lines.Reverse();
+    foreach (var line in lines)
+    {
+      if (line.Length == 0)
+      {
+        break;
+      }
+
+      var parts = line.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+      if (parts.Length != 2 || !int.TryParse(parts[0], out _))
+      {
+        continue;
+      }
+
+      cardNames.Add((parts[1], "commanders", 1));
+    }
+
+    lines.RemoveRange(0, cardNames.Count);
+    lines.Reverse();
+  }
+
+  private static async Task<CardInfo?> FetchCardInfo(string name)
+  {
+    var url = FuzzyFetchCardInfoEndpoint +Uri.EscapeDataString(name);
 
     try
     {
@@ -143,7 +168,8 @@ class Program
         oracle_text = json.Value<string>("oracle_text") ?? string.Empty,
         keywords = json["keywords"]?.ToObject<List<string>>() ?? [],
         power = json.Value<string>("power") ?? string.Empty,
-        toughness = json.Value<string>("toughness") ?? string.Empty
+        toughness = json.Value<string>("toughness") ?? string.Empty,
+        loyalty = json.Value<string>("loyalty") ?? string.Empty,
       };
     }
     catch (Exception ex)
