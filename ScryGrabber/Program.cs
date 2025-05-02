@@ -6,7 +6,7 @@ namespace ScryGrabber;
 
 internal class Program
 {
-  public static string FuzzyFetchCardInfoEndpoint = "https://api.scryfall.com/cards/named?fuzzy=";
+  public static string FetchCardInfoEndpoint = "https://api.scryfall.com/cards/named?fuzzy=";
 
   private static readonly HttpClient Client = new()
   {
@@ -142,7 +142,7 @@ internal class Program
 
   private static async Task<CardInfo?> FetchCardInfo(string name)
   {
-    var url = FuzzyFetchCardInfoEndpoint +Uri.EscapeDataString(name);
+    var url = FetchCardInfoEndpoint + Uri.EscapeDataString(name);
 
     try
     {
